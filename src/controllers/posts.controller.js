@@ -1,12 +1,5 @@
 const postsService = require('../services/posts.service');
-
-const isPositiveInteger = (val) => {
-  if (typeof val !== 'string') return false;
-  const trimmed = val.trim();
-  if (!/^\d+$/.test(trimmed)) return false;
-  const num = parseInt(trimmed, 10);
-  return num > 0 && String(num) === trimmed;
-};
+const { parsePagination } = require('../utils/pagination');
 
 const isValidDate = (val) => {
   if (typeof val !== 'string') return false;
@@ -18,32 +11,25 @@ const isValidDate = (val) => {
 
 const getPosts = async (req, res) => {
   try {
-    const { page: pageQuery, limit: limitQuery, sortBy: sortByQuery, order: orderQuery, location, search, from, to } = req.query;
-
-    if (pageQuery !== undefined && !isPositiveInteger(pageQuery)) {
-      return res.status(400).json({ error: 'page and limit must be positive integers' });
+    const pagination = parsePagination(req.query);
+    if (pagination.error) {
+      return res.status(400).json({ error: pagination.error });
     }
-    if (limitQuery !== undefined && !isPositiveInteger(limitQuery)) {
-      return res.status(400).json({ error: 'page and limit must be positive integers' });
-    }
+    const { page, limit, skip } = pagination;
 
-    let page = pageQuery !== undefined ? parseInt(pageQuery, 10) : 1;
-    let limit = limitQuery !== undefined ? parseInt(limitQuery, 10) : 10;
-    if (limit > 50) {
-      limit = 50;
-    }
-
-    const allowedSortBy = ['createdAt', 'updatedAt'];
-    const sortBy = sortByQuery || 'createdAt';
-    if (sortByQuery !== undefined && !allowedSortBy.includes(sortByQuery)) {
-      return res.status(400).json({ error: 'sortBy must be one of: createdAt, updatedAt' });
+    const allowedSortBy = ['createdAt', 'updatedAt', 'likes'];
+    const sortBy = req.query.sortBy || 'createdAt';
+    if (req.query.sortBy !== undefined && !allowedSortBy.includes(req.query.sortBy)) {
+      return res.status(400).json({ error: 'sortBy must be one of: createdAt, updatedAt, likes' });
     }
 
     const allowedOrder = ['asc', 'desc'];
-    const order = orderQuery || 'desc';
-    if (orderQuery !== undefined && !allowedOrder.includes(orderQuery)) {
+    const order = req.query.order || 'desc';
+    if (req.query.order !== undefined && !allowedOrder.includes(req.query.order)) {
       return res.status(400).json({ error: 'order must be asc or desc' });
     }
+
+    const { location, search, from, to } = req.query;
 
     if (from !== undefined && !isValidDate(from)) {
       return res.status(400).json({ error: 'from and to must be valid dates' });
@@ -55,6 +41,7 @@ const getPosts = async (req, res) => {
     const result = await postsService.getPosts({
       page,
       limit,
+      skip,
       sortBy,
       order,
       location,
@@ -71,9 +58,17 @@ const getPosts = async (req, res) => {
 
 const createPost = async (req, res) => {
   try {
-    const post = await postsService.createPost(req.body);
+    const { imageUrl, authorId, caption, location } = req.body || {};
+    if (!imageUrl || authorId === undefined || authorId === null || authorId === '') {
+      return res.status(400).json({ error: 'imageUrl and authorId are required' });
+    }
+
+    const post = await postsService.createPost({ imageUrl, authorId, caption, location });
     res.status(201).json(post);
   } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({ error: error.message });
+    }
     res.status(400).json({ error: error.message });
   }
 };
@@ -95,9 +90,12 @@ const getPostById = async (req, res) => {
 const updatePost = async (req, res) => {
   const { id } = req.params;
   try {
-    const post = await postsService.updatePost(id, req.body);
+    const post = await postsService.updatePost(id, req.body || {});
     res.json(post);
   } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({ error: error.message });
+    }
     res.status(400).json({ error: error.message });
   }
 };
@@ -108,6 +106,9 @@ const deletePost = async (req, res) => {
     await postsService.deletePost(id);
     res.status(204).send();
   } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({ error: error.message });
+    }
     res.status(400).json({ error: error.message });
   }
 };

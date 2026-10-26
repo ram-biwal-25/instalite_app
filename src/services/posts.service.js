@@ -1,6 +1,13 @@
 const prisma = require('../db');
+const { formatPaginatedResponse } = require('../utils/pagination');
 
-const getPosts = async ({ page = 1, limit = 10, sortBy = 'createdAt', order = 'desc', location, search, from, to } = {}) => {
+const userSummarySelect = {
+  id: true,
+  username: true,
+  fullname: true,
+};
+
+const getPosts = async ({ page = 1, limit = 10, skip = 0, sortBy = 'createdAt', order = 'desc', location, search, from, to } = {}) => {
   const where = {};
 
   if (location) {
@@ -17,64 +24,103 @@ const getPosts = async ({ page = 1, limit = 10, sortBy = 'createdAt', order = 'd
     if (to) where.createdAt.lt = new Date(to);
   }
 
+  let orderBy;
+  if (sortBy === 'likes') {
+    orderBy = [
+      { likes: { _count: order } },
+      { createdAt: 'desc' },
+    ];
+  } else {
+    orderBy = { [sortBy]: order };
+  }
+
   const [data, total] = await prisma.$transaction([
     prisma.post.findMany({
       where,
-      orderBy: { [sortBy]: order },
-      skip: (page - 1) * limit,
+      orderBy,
+      skip,
       take: limit,
+      include: {
+        author: {
+          select: userSummarySelect,
+        },
+        _count: {
+          select: { likes: true },
+        },
+      },
     }),
     prisma.post.count({ where }),
   ]);
 
-  const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
-
-  return {
-    data,
-    meta: {
-      page,
-      limit,
-      total,
-      totalPages,
-    },
-  };
+  return formatPaginatedResponse(data, page, limit, total);
 };
 
-const createPost = async (postData) => {
-  const { imageUrl, caption, location, title, content, authorId, userId } = postData;
+const createPost = async ({ imageUrl, authorId, caption, location }) => {
+  const authorIdInt = parseInt(authorId, 10);
+  const author = await prisma.user.findUnique({
+    where: { id: authorIdInt },
+  });
+  if (!author) {
+    const error = new Error('User not found');
+    error.status = 404;
+    throw error;
+  }
+
   return await prisma.post.create({
     data: {
-      imageUrl: imageUrl || 'https://picsum.photos/seed/default/600/600',
-      caption: caption !== undefined ? caption : (title || content || null),
+      imageUrl,
+      authorId: authorIdInt,
+      caption: caption || null,
       location: location || null,
-      userId: userId ? parseInt(userId, 10) : (authorId ? parseInt(authorId, 10) : undefined),
     },
   });
 };
 
 const getPostById = async (id) => {
+  const pId = parseInt(id, 10);
   return await prisma.post.findUnique({
-    where: { id: parseInt(id, 10) },
+    where: { id: pId },
+    include: {
+      author: {
+        select: userSummarySelect,
+      },
+      _count: {
+        select: { likes: true },
+      },
+    },
   });
 };
 
 const updatePost = async (id, postData) => {
+  const pId = parseInt(id, 10);
+  const existing = await prisma.post.findUnique({ where: { id: pId } });
+  if (!existing) {
+    const error = new Error('Post not found');
+    error.status = 404;
+    throw error;
+  }
+
   const data = {};
   if (postData.imageUrl !== undefined) data.imageUrl = postData.imageUrl;
   if (postData.caption !== undefined) data.caption = postData.caption;
   if (postData.location !== undefined) data.location = postData.location;
-  if (postData.title !== undefined || postData.content !== undefined) {
-    data.caption = postData.caption || postData.title || postData.content;
-  }
+
   return await prisma.post.update({
-    where: { id: parseInt(id, 10) },
+    where: { id: pId },
     data,
   });
 };
 
 const deletePost = async (id) => {
+  const pId = parseInt(id, 10);
+  const existing = await prisma.post.findUnique({ where: { id: pId } });
+  if (!existing) {
+    const error = new Error('Post not found');
+    error.status = 404;
+    throw error;
+  }
   return await prisma.post.delete({
-    where: { id: parseInt(id, 10) },
+    where: { id: pId },
   });
 };
 

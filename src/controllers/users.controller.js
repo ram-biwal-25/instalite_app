@@ -1,60 +1,57 @@
 const usersService = require('../services/users.service');
-
-const isPositiveInteger = (val) => {
-  if (typeof val !== 'string') return false;
-  const trimmed = val.trim();
-  if (!/^\d+$/.test(trimmed)) return false;
-  const num = parseInt(trimmed, 10);
-  return num > 0 && String(num) === trimmed;
-};
+const { parsePagination } = require('../utils/pagination');
 
 const getUsers = async (req, res) => {
   try {
-    const { page: pageQuery, limit: limitQuery, sortBy: sortByQuery, order: orderQuery, isPrivate: isPrivateQuery, search } = req.query;
-
-    if (pageQuery !== undefined && !isPositiveInteger(pageQuery)) {
-      return res.status(400).json({ error: 'page and limit must be positive integers' });
+    const pagination = parsePagination(req.query);
+    if (pagination.error) {
+      return res.status(400).json({ error: pagination.error });
     }
-    if (limitQuery !== undefined && !isPositiveInteger(limitQuery)) {
-      return res.status(400).json({ error: 'page and limit must be positive integers' });
-    }
-
-    let page = pageQuery !== undefined ? parseInt(pageQuery, 10) : 1;
-    let limit = limitQuery !== undefined ? parseInt(limitQuery, 10) : 10;
-    if (limit > 50) {
-      limit = 50;
-    }
+    const { page, limit, skip } = pagination;
 
     const allowedSortBy = ['createdAt', 'username', 'fullname'];
-    const sortBy = sortByQuery || 'createdAt';
-    if (sortByQuery !== undefined && !allowedSortBy.includes(sortByQuery)) {
+    const sortBy = req.query.sortBy || 'createdAt';
+    if (req.query.sortBy !== undefined && !allowedSortBy.includes(req.query.sortBy)) {
       return res.status(400).json({ error: 'sortBy must be one of: createdAt, username, fullname' });
     }
 
     const allowedOrder = ['asc', 'desc'];
-    const order = orderQuery || 'desc';
-    if (orderQuery !== undefined && !allowedOrder.includes(orderQuery)) {
+    const order = req.query.order || 'desc';
+    if (req.query.order !== undefined && !allowedOrder.includes(req.query.order)) {
       return res.status(400).json({ error: 'order must be asc or desc' });
     }
 
     let isPrivate;
-    if (isPrivateQuery !== undefined) {
-      if (isPrivateQuery === 'true') {
+    if (req.query.isPrivate !== undefined) {
+      if (req.query.isPrivate === 'true') {
         isPrivate = true;
-      } else if (isPrivateQuery === 'false') {
+      } else if (req.query.isPrivate === 'false') {
         isPrivate = false;
       } else {
         return res.status(400).json({ error: 'isPrivate must be true or false' });
       }
     }
 
+    let hasPosts;
+    if (req.query.hasPosts !== undefined) {
+      if (req.query.hasPosts === 'true') {
+        hasPosts = true;
+      } else if (req.query.hasPosts === 'false') {
+        hasPosts = false;
+      } else {
+        return res.status(400).json({ error: 'hasPosts must be true or false' });
+      }
+    }
+
     const result = await usersService.getUsers({
       page,
       limit,
+      skip,
       sortBy,
       order,
       isPrivate,
-      search,
+      search: req.query.search,
+      hasPosts,
     });
 
     res.json(result);
@@ -65,7 +62,7 @@ const getUsers = async (req, res) => {
 
 const createUser = async (req, res) => {
   try {
-    const user = await usersService.createUser(req.body);
+    const user = await usersService.createUser(req.body || {});
     res.status(201).json(user);
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -82,6 +79,42 @@ const getUserById = async (req, res) => {
       res.status(404).json({ error: 'User not found' });
     }
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const getUserPosts = async (req, res) => {
+  try {
+    const pagination = parsePagination(req.query);
+    if (pagination.error) {
+      return res.status(400).json({ error: pagination.error });
+    }
+    const { page, limit, skip } = pagination;
+
+    const result = await usersService.getUserPosts(req.params.id, { page, limit, skip });
+    res.json(result);
+  } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const getUserLikedPosts = async (req, res) => {
+  try {
+    const pagination = parsePagination(req.query);
+    if (pagination.error) {
+      return res.status(400).json({ error: pagination.error });
+    }
+    const { page, limit, skip } = pagination;
+
+    const result = await usersService.getUserLikedPosts(req.params.id, { page, limit, skip });
+    res.json(result);
+  } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({ error: error.message });
+    }
     res.status(500).json({ error: error.message });
   }
 };
@@ -111,6 +144,8 @@ module.exports = {
   getAllUsers: getUsers,
   createUser,
   getUserById,
+  getUserPosts,
+  getUserLikedPosts,
   updateUser,
   deleteUser,
 };

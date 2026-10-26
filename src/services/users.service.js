@@ -1,10 +1,23 @@
 const prisma = require('../db');
+const { formatPaginatedResponse } = require('../utils/pagination');
 
-const getUsers = async ({ page = 1, limit = 10, sortBy = 'createdAt', order = 'desc', isPrivate, search } = {}) => {
+const userSummarySelect = {
+  id: true,
+  username: true,
+  fullname: true,
+};
+
+const getUsers = async ({ page = 1, limit = 10, skip = 0, sortBy = 'createdAt', order = 'desc', isPrivate, search, hasPosts } = {}) => {
   const where = {};
 
   if (isPrivate !== undefined) {
     where.isPrivate = isPrivate;
+  }
+
+  if (hasPosts === true) {
+    where.posts = { some: {} };
+  } else if (hasPosts === false) {
+    where.posts = { none: {} };
   }
 
   if (search) {
@@ -18,23 +31,13 @@ const getUsers = async ({ page = 1, limit = 10, sortBy = 'createdAt', order = 'd
     prisma.user.findMany({
       where,
       orderBy: { [sortBy]: order },
-      skip: (page - 1) * limit,
+      skip,
       take: limit,
     }),
     prisma.user.count({ where }),
   ]);
 
-  const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
-
-  return {
-    data,
-    meta: {
-      page,
-      limit,
-      total,
-      totalPages,
-    },
-  };
+  return formatPaginatedResponse(data, page, limit, total);
 };
 
 const createUser = async (userData) => {
@@ -46,7 +49,7 @@ const createUser = async (userData) => {
       username: resolvedUsername,
       email,
       fullname: resolvedFullname,
-      bio,
+      bio: bio || null,
       isPrivate: isPrivate !== undefined ? Boolean(isPrivate) : false,
     },
   });
@@ -55,7 +58,81 @@ const createUser = async (userData) => {
 const getUserById = async (id) => {
   return await prisma.user.findUnique({
     where: { id: parseInt(id, 10) },
+    include: {
+      _count: {
+        select: {
+          posts: true,
+          likes: true,
+        },
+      },
+    },
   });
+};
+
+const getUserPosts = async (userId, { page = 1, limit = 10, skip = 0 } = {}) => {
+  const uId = parseInt(userId, 10);
+  const user = await prisma.user.findUnique({ where: { id: uId } });
+  if (!user) {
+    const error = new Error('User not found');
+    error.status = 404;
+    throw error;
+  }
+
+  const where = { authorId: uId };
+  const [data, total] = await prisma.$transaction([
+    prisma.post.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+      include: {
+        _count: {
+          select: { likes: true },
+        },
+      },
+    }),
+    prisma.post.count({ where }),
+  ]);
+
+  return formatPaginatedResponse(data, page, limit, total);
+};
+
+const getUserLikedPosts = async (userId, { page = 1, limit = 10, skip = 0 } = {}) => {
+  const uId = parseInt(userId, 10);
+  const user = await prisma.user.findUnique({ where: { id: uId } });
+  if (!user) {
+    const error = new Error('User not found');
+    error.status = 404;
+    throw error;
+  }
+
+  const where = {
+    likes: {
+      some: {
+        userId: uId,
+      },
+    },
+  };
+
+  const [data, total] = await prisma.$transaction([
+    prisma.post.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+      include: {
+        author: {
+          select: userSummarySelect,
+        },
+        _count: {
+          select: { likes: true },
+        },
+      },
+    }),
+    prisma.post.count({ where }),
+  ]);
+
+  return formatPaginatedResponse(data, page, limit, total);
 };
 
 const updateUser = async (id, userData) => {
@@ -84,6 +161,8 @@ module.exports = {
   getAllUsers: getUsers,
   createUser,
   getUserById,
+  getUserPosts,
+  getUserLikedPosts,
   updateUser,
   deleteUser,
 };
