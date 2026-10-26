@@ -1,7 +1,8 @@
 require('dotenv').config();
 const express = require('express');
-const routes = require('./routes');
-const prisma = require('./config/db');
+const usersRoutes = require('./routes/users.routes');
+const postsRoutes = require('./routes/posts.routes');
+const prisma = require('./db');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -9,7 +10,8 @@ const port = process.env.PORT || 3000;
 app.use(express.json());
 
 // Routes
-app.use(routes);
+app.use('/users', usersRoutes);
+app.use('/posts', postsRoutes);
 
 // Start the server
 let server;
