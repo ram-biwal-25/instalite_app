@@ -1,19 +1,25 @@
-// Prisma
-const { PrismaClient } = require('@prisma/client');
-const { PrismaPg } = require('@prisma/adapter-pg');
-const { Pool } = require('pg');
-
-
-const connectionString = process.env.DATABASE_URL || "postgresql://ram@localhost:5432/db2"; // adjust if your URL is different
-const pool = new Pool({ connectionString });
-const adapter = new PrismaPg(pool);
-
-
-const prisma = new PrismaClient({ adapter });
-// Express
+require('dotenv').config();
 const express = require('express');
+const routes = require('./routes');
+const prisma = require('./config/db');
+
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 app.use(express.json());
 
+// Routes
+app.use(routes);
+
+// Start the server
+let server;
+if (process.env.NODE_ENV !== 'test') {
+  server = app.listen(port, () => {
+    console.log(`Server is running on http://localhost:${port}`);
+  });
+}
+
+module.exports = app;
+module.exports.app = app;
+module.exports.server = server;
+module.exports.prisma = prisma;
